@@ -9,7 +9,7 @@ Enable i386 architecture on Debian based system(s):
 sudo dpkg --add-architecture i386  
 ```
 
-VMWare mount shared folders from host into guest /mnt:  
+VMWare Workstation mount shared folders from host into guest /mnt:  
 ```bash
 sudo /usr/bin/vmhgfs-fuse .host:/ /mnt -o subtype=vmhgfs-fuse,allow_other  
 ```
