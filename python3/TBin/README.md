@@ -22,6 +22,7 @@ lief == 0.11.4
 ```
 
 ## Optional  
+libssl-dev **MUST** be installed before yara-python installation if using yara-python below  
 ```
 python-magic == 0.4.22  (Adds in pretty 'magic' detection, not required)  
 yara_python == 4.0.5  (Adds in the ability to use yara-rules to scan a file)  
