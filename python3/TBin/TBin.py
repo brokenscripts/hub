@@ -25,6 +25,9 @@ except ImportError:
 Source: https://github.com/lief-project/LIEF/blob/e875a8ffa279ddced72ea2f8add8e569791cf115/examples/python/pe_reader.py
 Tested on Python 3.7.3
 Version: 0.4-20210404
+
+BEFORE Installing yara, you MUST have libssl-dev installed otherwise there will be lots of issues.  
+PIP builds from source and if libssl-dev isn't present, it compiles yara without that support.  That causes a major issue.
 """
 
 def parse_args():
@@ -529,15 +532,16 @@ def get_yara_rules_path(path=None):
     if not path:
         basePath = os.path.dirname(os.path.realpath(__file__))  # Path is now where the script is ran from
         path = os.path.join(basePath, 'rules')  # Append rules to path, this is where yara-rules should be
-    print(f"Path is {path}")
+    print(f"yara-rules path is {path}")
     return path
 
 
 def compileYaraRules(yaraRulesPath, yaraIndex="index.yar"):
     """Compile all files shown in passed in index (defaults to index.yar)"""
     indexLoc = os.path.join(yaraRulesPath, yaraIndex)
-    print(f"Compiling yara-rules using index: {indexLoc}")
+    print(f"Compiling yara-rules using default index.yar at: {indexLoc}")
 
+    # Primarily ELF yara rules
     badImports = ['MALW_AZORULT.yar', 'MALW_Httpsd_ELF.yar', 'MALW_Mirai_Okiru_ELF.yar', 'MALW_Mirai_Satori_ELF.yar', 'MALW_Rebirth_Vulcan_ELF.yar', 
     'MALW_TinyShell_Backdoor_gen.yar', 'MALW_Torte_ELF.yar', 'TOOLKIT_Mandibule.yar']
 
@@ -560,7 +564,7 @@ def compileYaraRules(yaraRulesPath, yaraIndex="index.yar"):
                         hugeDict[str(counter)] = includePath
                         counter += 1
     #print(hugeDict)
-    print(f"Compiled {len(hugeDict)} yara rules.")
+    print(f"[*] Compiled {len(hugeDict)} yara rules.")
     #print("")
 
     rules = yara.compile(filepaths=hugeDict)
@@ -620,7 +624,7 @@ def main():
         
         rules = compileYaraRules(yaraRulesPath)
     
-        matches = rules.match(data=binary.rawBinary)
+        matches = rules.match(data=binary.rawBinary, fast=True)
         if matches:
             for hit in matches:
                 if hit.meta.get('description'):
