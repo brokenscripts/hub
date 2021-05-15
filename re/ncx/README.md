@@ -1,1 +1,1 @@
-Files from the NCX CTF.  
+Writeups from the NCX CTF.  
