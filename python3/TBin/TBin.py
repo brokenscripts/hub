@@ -33,7 +33,7 @@ PIP builds from source and if libssl-dev isn't present, it compiles yara without
 def parse_args():
     """Clean way to parse args instead of lumping inside main"""
     parser = argparse.ArgumentParser()
-    parser.add_argument("pe_file")
+    parser.add_argument("binary_file")
 
     parser.add_argument('-a', '--all',
             action='store_true', dest='show_all',   # Set a true flag if used.  Store in show_all variable
@@ -75,8 +75,141 @@ class exceptions_handler(object):
                 traceback.print_tb(exc_traceback)
                 print("-" * 60)
 
+class ELF:
+    def __init__(self, args):
+        """
+        Store the lief.ELF.parse object as liefBinary.  For use with LIEF
+        Store the raw bytes read in as rawBinary.  For use with YARA / raw byte matching
+        """
+        try:
+            lief.logging.set_level(lief.logging.LOGGING_LEVEL.ERROR) # Only interested when things go really bad
+        except:
+            pass
+        try:
+            # Create the liefBinary (Lief) object
+            self.liefBinary = lief.ELF.parse(args.binary_file)
+            # Creat the rawBinary object
+            with open(args.binary_file, 'rb') as f:
+                self.rawBinary = f.read()
+        except lief.exception as e:
+            print(e)
+            sys.exit(1)
+        self.md5 = hashlib.md5(self.rawBinary).hexdigest()
+        self.sha1 = hashlib.sha1(self.rawBinary).hexdigest()
+        self.sha256 = hashlib.sha256(self.rawBinary).hexdigest()
+        self.size = os.path.getsize(args.binary_file)
+        if magicInstalled:
+            self.magic = magic.from_file(args.binary_file)
+        self.pie = self.liefBinary.is_pie
+        self.nx = self.liefBinary.has_nx
+        self.header = self.liefBinary.header
+        self.identity = self.header.identity
 
-class Binary:
+
+    #@exceptions_handler(Exception)
+    def print_information(self):
+
+        print("# Information  \n")
+        print("```")
+        format_str = "{:<30} {:<30}"
+        format_dec = "{:<30} {:<30d}"
+        format_hex = "{:<30} 0x{:<28x}"
+        format_ide = "{:<30} {:<02x} {:<02x} {:<02x} {:<02x}"
+
+        eflags_str = ""
+        if self.header.machine_type == lief.ELF.ARCH.ARM:
+            eflags_str = " - ".join([str(s).split(".")[-1] for s in self.header.arm_flags_list])
+
+        if self.header.machine_type in [lief.ELF.ARCH.MIPS, lief.ELF.ARCH.MIPS_RS3_LE, lief.ELF.ARCH.MIPS_X]:
+            eflags_str = " - ".join([str(s).split(".")[-1] for s in self.header.mips_flags_list])
+
+        if self.header.machine_type == lief.ELF.ARCH.PPC64:
+            eflags_str = " - ".join([str(s).split(".")[-1] for s in self.header.ppc64_flags_list])
+
+        if self.header.machine_type == lief.ELF.ARCH.HEXAGON:
+            eflags_str = " - ".join([str(s).split(".")[-1] for s in self.header.hexagon_flags_list])
+
+        print(format_str.format("Name:",                self.liefBinary.name))
+        print(format_str.format("File Size:",           self.size))
+        if magicInstalled:
+            print(format_str.format("Magic:",               self.magic))
+        else:
+            print(format_ide.format("Magic:",                 self.identity[0], self.identity[1], self.identity[2], self.identity[3]))
+        print(format_hex.format("Virtual size:",        self.liefBinary.virtual_size))
+        print(format_str.format("MD5:",                 self.md5))
+        print(format_str.format("SHA1:",                self.sha1))
+        print(format_str.format("SHA256:",              self.sha256))
+        print(format_str.format("PIE:",                 str(self.pie)))
+        print(format_str.format("NX:",                  str(self.nx)))
+        print(format_str.format("Class:",                 str(self.header.identity_class).split(".")[-1]))
+        print(format_str.format("Endianness:",            str(self.header.identity_data).split(".")[-1]))
+        print(format_str.format("Version:",               str(self.header.identity_version).split(".")[-1]))
+        print(format_str.format("OS/ABI:",                str(self.header.identity_os_abi).split(".")[-1]))
+        print(format_dec.format("ABI Version:",           self.header.identity_abi_version))
+        print(format_str.format("File Type:",             str(self.header.file_type).split(".")[-1]))
+        print(format_str.format("Machine Type:",          str(self.header.machine_type).split(".")[-1]))
+        print(format_str.format("Object File Version:",   str(self.header.object_file_version).split(".")[-1]))
+        print(format_hex.format("Entry Point:",           self.header.entrypoint))
+        print(format_hex.format("Program Header Offset:", self.header.program_header_offset))
+        print(format_hex.format("Section Header Offset:", self.header.section_header_offset))
+        print(format_hex.format("Processor flags:",       self.header.processor_flag) + eflags_str)
+        print(format_dec.format("Header Size:",           self.header.header_size))
+        print(format_dec.format("Program Header Size:",   self.header.program_header_size))
+        print(format_dec.format("Section Header Size:",   self.header.section_header_size))
+        print(format_dec.format("Number of segments:",    self.header.numberof_segments))
+        print(format_dec.format("Number of sections:",    self.header.numberof_sections))
+        print("```")
+        print("")
+
+
+    def print_sections(self):
+        sections = self.liefBinary.sections
+
+        print("\n# Sections  \n")
+        print("```")
+
+        if len(sections) > 0:
+            f_title = "|{:<30} | {:<12}| {:<17}| {:<12}| {:<10}| {:<8}| {:<8}|"
+            f_value = "|{:<30} | {:<12}| 0x{:<14x} | 0x{:<10x}| 0x{:<8x}| {:<8.2f}| {:<10}"
+            print(f_title.format("Name", "Type", "Virtual address", "File offset", "Size", "Entropy", "Segment(s)"))
+
+            for section in sections:
+                segments_str = " - ".join([str(s.type).split(".")[-1] for s in section.segments])
+                print(f_value.format(
+                    section.name,
+                    str(section.type).split(".")[-1],
+                    section.virtual_address,
+                    section.file_offset,
+                    section.size,
+                    abs(section.entropy),
+                    segments_str))
+            print("```")
+            print("")
+        else:
+            print("No sections\n")
+            print("```")
+
+
+
+    def print_import_name_only(self):
+        symbols = self.liefBinary.imported_symbols
+        if len(symbols) > 0:
+            print("\n# Import Summary \n")
+            print("```")
+            import_list = []
+            for i in symbols:
+                if i.imported:
+                    import_list.append(i.name)
+            print(sorted(import_list))
+            print("```")
+        else:
+            print("No imported symbols")
+        print("")
+
+
+
+
+class PE:
     def __init__(self, args):
         """
         Store the lief.PE.parse object as liefBinary.  For use with LIEF
@@ -88,9 +221,9 @@ class Binary:
             pass
         try:
             # Create the liefBinary (Lief) object
-            self.liefBinary = lief.PE.parse(args.pe_file)
+            self.liefBinary = lief.PE.parse(args.binary_file)
             # Creat the rawBinary object
-            with open(args.pe_file, 'rb') as f:
+            with open(args.binary_file, 'rb') as f:
                 self.rawBinary = f.read()
         except lief.exception as e:
             print(e)
@@ -98,9 +231,9 @@ class Binary:
         self.md5 = hashlib.md5(self.rawBinary).hexdigest()
         self.sha1 = hashlib.sha1(self.rawBinary).hexdigest()
         self.sha256 = hashlib.sha256(self.rawBinary).hexdigest()
-        self.size = os.path.getsize(args.pe_file)
+        self.size = os.path.getsize(args.binary_file)
         if magicInstalled:
-            self.magic = magic.from_file(args.pe_file)
+            self.magic = magic.from_file(args.binary_file)
         self.pie = self.liefBinary.is_pie
         self.nx = self.liefBinary.has_nx
         self.dep = self.liefBinary.optional_header.has(lief.PE.DLL_CHARACTERISTICS.NX_COMPAT)
@@ -116,6 +249,7 @@ class Binary:
     #@exceptions_handler(Exception)
     def print_information(self):
         print("# Information  \n")
+        print("```")
         format_str = "{:<30} {:<30}"
         format_hex = "{:<30} 0x{:<28x}"
         print(format_str.format("Name:",                self.liefBinary.name))
@@ -139,6 +273,7 @@ class Binary:
             print(format_str.format("/GS:",             str("False")))
         print(format_str.format("NOSEH:",               str(self.noseh)))
         print(format_str.format("TLS:",                 str(self.tls)))
+        print("```")
         print("")
 
 
@@ -154,6 +289,7 @@ class Binary:
         sections = self.liefBinary.sections
 
         print("\n# Sections  \n")
+        print("```")
         f_title = "| {:<10} | {:<16} | {:<16} | {:<18} | {:<16} | {:<9} | {:<9}"
         f_value = "| {:<10} | 0x{:<14x} | 0x{:<14x} | 0x{:<16x} | 0x{:<14x} | {:<9.2f} | {:<9}"
         print(f_title.format("Name", "Offset", "Size", "Virtual Address", "Virtual size", "Entropy", "Flags"))
@@ -163,15 +299,18 @@ class Binary:
             for flag in section.characteristics_lists:
                 flags += str(flag).split(".")[-1] + " "
             print(f_value.format(section.name, section.offset, section.size, section.virtual_address, section.virtual_size, section.entropy, flags))
+        print("```")
         print("")
 
     
     def print_import_name_only(self):
         print("\n# Import Summary \n")
+        print("```")
         import_list = []
         for i in self.liefBinary.imports:
             import_list.append(i.name)
         print(sorted(import_list))
+        print("```")
         print("")
 
 
@@ -570,15 +709,41 @@ def compileYaraRules(yaraRulesPath, yaraIndex="index.yar"):
     rules = yara.compile(filepaths=hugeDict)
     return rules
 
+def check_magic(args_file):
+    try:
+        # ELF or PE?
+        with open(args_file, 'rb') as f:
+            magic = f.read(4)
+            #print(f"First 4 bytes: {magic}")
+            if magic == b'\x7F\x45\x4c\x46':
+                #print("Linux ELF found")
+                return "elf"
+            elif magic[0:2] == b'\x4d\x5a':
+                #print("DOS MZ executable")
+                return "pe"
+            elif magic[0:2] == b'\x5a\x4d':
+                #print("DOS ZM executable")
+                return "pe"
+            else:
+                print("Not detecting ELF or PE")
+                sys.exit(1)
+    except Exception as e:
+        print(e)
+        sys.exit(1)
 
 def main():
     args = parse_args()     # Verbose.. for now
+    flavor = check_magic(args.binary_file)
     print("\n\n")                       # Remove me
-    binary = Binary(args)
+    if flavor == "pe":
+        binary = PE(args)
+    elif flavor == "elf":
+        binary = ELF(args)
     binary.print_information()          # Basic file info
     binary.print_sections()             # Sections glance, to see if anything interesting
     if not args.show_all:
-        binary.print_version_only()     # Print useful info from exe
+        if flavor == "pe":
+            binary.print_version_only()     # Print useful info from exe
         binary.print_import_name_only() # Print DLL import names only, when not using full
     # print headers (dos, pe, optional)
     if args.show_all:
